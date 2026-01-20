@@ -791,7 +791,7 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
         } else {
             (None, None)
         };
-
+    info!("HELLO WORLD!!!");
     info!(
         "Starting router on {}:{} | mode: {:?} | policy: {:?} | max_payload: {}MB",
         config.host,
