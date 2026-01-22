@@ -592,6 +592,7 @@ impl RouterTrait for RouterManager {
     ) -> Response {
         // In IGW mode, resolve model_id and fail fast if not resolvable
         // In non-IGW mode, pass through to router (router handles validation)
+        info!("route_completion 方法");
         let effective_model_id = if self.enable_igw {
             // Use provided model_id or fall back to body.model
             let model = model_id.or(Some(&body.model));
