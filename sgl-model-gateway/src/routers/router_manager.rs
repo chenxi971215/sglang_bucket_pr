@@ -365,40 +365,18 @@ impl RouterManager {
         let is_router_valid =
             |is_pd: bool| (is_pd && num_pd_workers > 0) || (!is_pd && num_regular_workers > 0);
     
-        // if let Some(model) = model_id {
-        //     // Efficient Single Lookup for Specific Model
-        //     if let Some(router) = self.get_router_for_model(model) {
-        //         info!("router.is_pd_mode() == > {}", router.is_pd_mode());
-        //         if is_router_valid(router.is_pd_mode()) {
-        //             return Some(router);
-        //         }
-        //     }
-        // } else {
-        //     // ZERO-ALLOCATION Snapshot Iteration (Hot Path Optimization)
-        //     // Atomic load avoids heap allocations and DashMap shard locks per-request
-        //     let routers_snapshot = self.routers_snapshot.load();
-        //     for router in routers_snapshot.iter() {
-        //         let mut score = 1.0;
-
-        //         let is_pd = router.is_pd_mode();
-        //         if prefer_pd && is_pd {
-        //             score += 2.0;
-        //         } else if !prefer_pd && !is_pd {
-        //             score += 1.0;
-        //         }
-        //         // TODO: Once routers expose worker stats, we can evaluate:
-        //         // - Average worker priority vs priority_threshold
-        //         // - Average worker cost vs max_cost
-        //         // - Current load and health status
-
-        //         if score > best_score && is_router_valid(is_pd) {
-        //             best_score = score;
-        //             best_router = Some(Arc::clone(router));
-        //         }
-        //     }
-        // }
-
-        let routers_snapshot = self.routers_snapshot.load();
+        if let Some(model) = model_id {
+            // Efficient Single Lookup for Specific Model
+            if let Some(router) = self.get_router_for_model(model) {
+                info!("router.is_pd_mode() == > {}", router.is_pd_mode());
+                if is_router_valid(router.is_pd_mode()) {
+                    return Some(router);
+                }
+            }
+        } else {
+            // ZERO-ALLOCATION Snapshot Iteration (Hot Path Optimization)
+            // Atomic load avoids heap allocations and DashMap shard locks per-request
+            let routers_snapshot = self.routers_snapshot.load();
             for router in routers_snapshot.iter() {
                 let mut score = 1.0;
 
@@ -418,6 +396,28 @@ impl RouterManager {
                     best_router = Some(Arc::clone(router));
                 }
             }
+        }
+
+        // let routers_snapshot = self.routers_snapshot.load();
+        //     for router in routers_snapshot.iter() {
+        //         let mut score = 1.0;
+
+        //         let is_pd = router.is_pd_mode();
+        //         if prefer_pd && is_pd {
+        //             score += 2.0;
+        //         } else if !prefer_pd && !is_pd {
+        //             score += 1.0;
+        //         }
+        //         // TODO: Once routers expose worker stats, we can evaluate:
+        //         // - Average worker priority vs priority_threshold
+        //         // - Average worker cost vs max_cost
+        //         // - Current load and health status
+
+        //         if score > best_score && is_router_valid(is_pd) {
+        //             best_score = score;
+        //             best_router = Some(Arc::clone(router));
+        //         }
+        //     }
 
         best_router
     }
