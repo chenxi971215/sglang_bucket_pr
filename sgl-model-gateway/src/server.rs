@@ -194,6 +194,9 @@ async fn v1_completions(
     headers: http::HeaderMap,
     Json(body): Json<CompletionRequest>,
 ) -> Response {
+    info!("根据 url 路由到v1_completions 方法");
+    info!("header ==> {:#?}", headers);
+    info!("body ==> {:#?}", body);
     state
         .router
         .route_completion(Some(&headers), &body, Some(&body.model))

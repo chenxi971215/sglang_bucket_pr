@@ -279,7 +279,7 @@ impl RouterManager {
 
     pub fn get_router_for_model(&self, model_id: &str) -> Option<Arc<dyn RouterTrait>> {
         let workers = self.worker_registry.get_by_model(model_id);
-        info!("get_router_for_model == > workers {:#?}", workers);
+        // info!("get_router_for_model == > workers {:#?}", workers);
 
         // Find the best router ID based on worker capabilities
         // Priority: external (OpenAI) > grpc-pd > http-pd > grpc-regular > http-regular
