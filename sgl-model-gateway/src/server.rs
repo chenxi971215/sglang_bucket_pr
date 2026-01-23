@@ -913,6 +913,8 @@ pub async fn startup(config: ServerConfig) -> Result<(), Box<dyn std::error::Err
         "Workers initialized: {} total, {} healthy",
         worker_stats.total_workers, worker_stats.healthy_workers
     );
+    info!("这里开始加载router_manager");
+    info!("app_context info == > {:#?}", app_context);
 
     let router_manager = RouterManager::from_config(&config, &app_context).await?;
     let router: Arc<dyn RouterTrait> = router_manager.clone();
