@@ -276,6 +276,7 @@ impl PDRouter {
     async fn execute_dual_dispatch<T: Serialize + Clone>(
         &self,
         headers: Option<&HeaderMap>,
+        // req body
         original_request: &T,
         context: PDRequestContext<'_>,
     ) -> Response {
@@ -332,6 +333,7 @@ impl PDRouter {
                             Ok(v) => v,
                             Err(e) => return Self::handle_serialization_error(e),
                         };
+                        info!("json_request ==> {}", json_request);
 
                         json_request = match Self::inject_bootstrap_into_value(
                             json_request,

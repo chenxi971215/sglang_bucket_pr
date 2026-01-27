@@ -33,7 +33,14 @@ use crate::{
     },
     routers::RouterTrait,
     server::ServerConfig,
+    schedulers::{
+        SchedulerPolicy,
+        proportion::ProportionScheduler,
+        factory::SchedulerFactory,
+
+    },
 };
+use tiktoken_rs::CoreBPE;
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct RouterId(&'static str);
@@ -65,16 +72,21 @@ pub struct RouterManager {
     routers_snapshot: ArcSwap<Vec<Arc<dyn RouterTrait>>>,
     default_router: Arc<std::sync::RwLock<Option<RouterId>>>,
     enable_igw: bool,
+    tokenizer: Option<Arc<CoreBPE>>,
+    scheduler: Option<Arc<dyn SchedulerPolicy>>,
 }
 
 impl RouterManager {
     pub fn new(worker_registry: Arc<WorkerRegistry>) -> Self {
+        info!("RouterManager new 初始化");
         Self {
             worker_registry,
             routers: Arc::new(DashMap::new()),
-            routers_snapshot: ArcSwap::from_pointee(Vec::new()),
+            routers_snapshot: ArcSwap::from_pointee(Vec::new()), 
             default_router: Arc::new(std::sync::RwLock::new(None)),
             enable_igw: false, // Will be set properly in from_config
+            tokenizer: None,
+            scheduler: None,
         }
     }
 
@@ -84,8 +96,12 @@ impl RouterManager {
     ) -> Result<Arc<Self>, String> {
         use crate::routers::RouterFactory;
 
+        let scheduler_config = &config.router_config.scheduler;
+        let scheduler = SchedulerFactory::create_from_config(scheduler_config);
+
         let mut manager = Self::new(app_context.worker_registry.clone());
         manager.enable_igw = config.router_config.enable_igw;
+        manager.scheduler = Some(scheduler);
         let manager = Arc::new(manager);
 
         if config.router_config.enable_igw {
@@ -165,6 +181,9 @@ impl RouterManager {
                 "RouterManager initialized with {} routers for multi-router mode",
                 manager.router_count(),
             );
+
+            
+
         } else {
             info!("Initializing RouterManager in single-router mode");
 
