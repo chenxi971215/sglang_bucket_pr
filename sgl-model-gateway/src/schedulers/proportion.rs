@@ -18,18 +18,18 @@ pub struct ProportionSchedulerConfig {
     pub balance_abs_threshold: usize,
     /// Relative difference in normalized load to trigger imbalance override.
     pub balance_rel_threshold: f32,
-    /// The performance weight of a single Regular worker relative to a PD pair (e.g., 0.8).
+    /// The performance weight of a single Regular worker relative to a PD pair (e.g., 0.4).
     pub regular_worker_weight: f32,
 }
 
 impl Default for ProportionSchedulerConfig {
     fn default() -> Self {
         Self {
-            adjust_interval: Duration::from_secs(10),
-            adjust_window: Duration::from_secs(60),
-            balance_abs_threshold: 32000,
-            balance_rel_threshold: 1.5,
-            regular_worker_weight: 0.8,
+            adjust_interval: Duration::from_secs(5),
+            adjust_window: Duration::from_secs(10),
+            balance_abs_threshold: 2000,
+            balance_rel_threshold: 1.001,
+            regular_worker_weight: 0.4,
         }
     }
 }
@@ -57,11 +57,9 @@ pub struct ProportionScheduler {
     crossover_point: Arc<RwLock<usize>>,
     /// A queue of recent requests used for calculating the crossover point.
     global_request_queue: Arc<RwLock<VecDeque<RequestRecord>>>,
-    // /// The current total token load for the PD router within the adjustment window.
-    // pd_router_load: Arc<RwLock<usize>>,
-    // /// The current total token load for the Regular router within the adjustment window.
-    // regular_router_load: Arc<RwLock<usize>>,
+    /// The current total token load for the routers within the adjustment window.
     router_loads: Arc<RwLock<std::collections::HashMap<RouterId, usize>>>,
+    /// The current workers count for the routers
     worker_counts: Arc<RwLock<std::collections::HashMap<RouterId, usize>>>,
     /// Scheduler configuration.
     config: ProportionSchedulerConfig,
@@ -110,11 +108,10 @@ impl ProportionScheduler {
         worker_counts: Arc<RwLock<std::collections::HashMap<RouterId, usize>>>,
         config: ProportionSchedulerConfig,
     ) -> tokio::task::JoinHandle<()> {
-        info!("start_adjustment_task ====");
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(config.adjust_interval).await;
-
+                info!("触发调整");
                 // --- 1. Decay Old Records ---
                 let mut queue_guard = global_request_queue.write().unwrap();
                 let mut loads_guard = router_loads.write().unwrap();
@@ -194,72 +191,77 @@ impl SchedulerPolicy for ProportionScheduler {
         candidate_routers: &[RouterId],
         info: &SelectRouterInfo<'_>,
     ) -> Option<RouterId> {
+        info!("select_router open");
         let token_count = info.tokens.map_or(0, |t| t.len());
 
-        let loads_guard = self.router_loads.read().unwrap();
-        let counts_guard = self.worker_counts.read().unwrap();
+        // --- 步骤 1: 决策阶段 ---
+        // 把所有需要读锁的操作放在一个代码块里
+        let choice: Option<RouterId> = { // 使用块表达式来限制锁的生命周期
+            let loads_guard = self.router_loads.read().unwrap();
+            let counts_guard = self.worker_counts.read().unwrap();
 
-        // --- Imbalance Check (Safety Override) ---
-        let pd_load = *loads_guard.get(&router_ids::HTTP_PD).unwrap_or(&0) + *loads_guard.get(&router_ids::GRPC_PD).unwrap_or(&0);
-        let regular_load = *loads_guard.get(&router_ids::HTTP_REGULAR).unwrap_or(&0) + *loads_guard.get(&router_ids::GRPC_REGULAR).unwrap_or(&0);
+            let pd_load = *loads_guard.get(&router_ids::HTTP_PD).unwrap_or(&0) + *loads_guard.get(&router_ids::GRPC_PD).unwrap_or(&0);
+            let regular_load = *loads_guard.get(&router_ids::HTTP_REGULAR).unwrap_or(&0) + *loads_guard.get(&router_ids::GRPC_REGULAR).unwrap_or(&0);
 
-        let pd_workers = *counts_guard.get(&router_ids::HTTP_PD).unwrap_or(&0) + *counts_guard.get(&router_ids::GRPC_PD).unwrap_or(&0);
-        let regular_workers = *counts_guard.get(&router_ids::HTTP_REGULAR).unwrap_or(&0) + *counts_guard.get(&router_ids::GRPC_REGULAR).unwrap_or(&0);
+            let pd_workers = *counts_guard.get(&router_ids::HTTP_PD).unwrap_or(&0) + *counts_guard.get(&router_ids::GRPC_PD).unwrap_or(&0);
+            let regular_workers = *counts_guard.get(&router_ids::HTTP_REGULAR).unwrap_or(&0) + *counts_guard.get(&router_ids::GRPC_REGULAR).unwrap_or(&0);
 
-        let total_pd_weight = pd_workers as f32;
-        let total_regular_weight = regular_workers as f32 * self.config.regular_worker_weight;
+            let total_pd_weight = pd_workers as f32;
+            let total_regular_weight = regular_workers as f32 * self.config.regular_worker_weight;
 
-        let norm_pd_load = if total_pd_weight > 0.0 { pd_load as f32 / total_pd_weight } else { f32::MAX };
-        let norm_regular_load = if total_regular_weight > 0.0 { regular_load as f32 / total_regular_weight } else { f32::MAX };
-        
-        // Helper closure to select the best available router of a given type
-        let select_best_available = |choices: &[RouterId]| -> Option<RouterId> {
-            choices.iter()
-                   .find(|id| candidate_routers.contains(id))
-                   .cloned()
-        };
+            let norm_pd_load = if total_pd_weight > 0.0 { pd_load as f32 / total_pd_weight } else { f32::MAX };
+            let norm_regular_load = if total_regular_weight > 0.0 { regular_load as f32 / total_regular_weight } else { f32::MAX };
+            
+            let select_best_available = |choices: &[RouterId]| -> Option<RouterId> {
+                choices.iter().find(|id| candidate_routers.contains(id)).cloned()
+            };
 
-        let imbalanced_choice = if (norm_pd_load - norm_regular_load).abs() > self.config.balance_abs_threshold as f32
-            && (norm_pd_load > norm_regular_load * self.config.balance_rel_threshold || norm_regular_load > norm_pd_load * self.config.balance_rel_threshold)
-        {
-            debug!("Scheduler is imbalanced. Norm Regular: {}, Norm PD: {}", norm_regular_load, norm_pd_load);
-            if norm_regular_load < norm_pd_load {
-                select_best_available(&[router_ids::HTTP_REGULAR, router_ids::GRPC_REGULAR])
+            let imbalanced_choice = if (norm_pd_load - norm_regular_load).abs() > self.config.balance_abs_threshold as f32
+                && (norm_pd_load > norm_regular_load * self.config.balance_rel_threshold || norm_regular_load > norm_pd_load * self.config.balance_rel_threshold)
+            {
+                debug!("Scheduler is imbalanced. Norm Regular: {}, Norm PD: {}", norm_regular_load, norm_pd_load);
+                if norm_regular_load < norm_pd_load {
+                    select_best_available(&[router_ids::HTTP_REGULAR, router_ids::GRPC_REGULAR])
+                } else {
+                    select_best_available(&[router_ids::HTTP_PD, router_ids::GRPC_PD])
+                }
             } else {
-                select_best_available(&[router_ids::HTTP_PD, router_ids::GRPC_PD])
-            }
-        } else {
-            None
-        };
+                None
+            };
 
-        let choice = if let Some(id) = imbalanced_choice {
-            Some(id)
-        } else {
-            // --- Threshold-based Routing ---
-            let crossover = *self.crossover_point.read().unwrap();
-            if token_count <= crossover {
-                select_best_available(&[router_ids::HTTP_REGULAR, router_ids::GRPC_REGULAR])
-                    .or_else(|| select_best_available(&[router_ids::HTTP_PD, router_ids::GRPC_PD]))
+            if let Some(id) = imbalanced_choice {
+                Some(id)
             } else {
-                select_best_available(&[router_ids::HTTP_PD, router_ids::GRPC_PD])
-                    .or_else(|| select_best_available(&[router_ids::HTTP_REGULAR, router_ids::GRPC_REGULAR]))
+                let crossover = *self.crossover_point.read().unwrap();
+                if token_count <= crossover {
+                    select_best_available(&[router_ids::HTTP_REGULAR, router_ids::GRPC_REGULAR])
+                        .or_else(|| select_best_available(&[router_ids::HTTP_PD, router_ids::GRPC_PD]))
+                } else {
+                    select_best_available(&[router_ids::HTTP_PD, router_ids::GRPC_PD])
+                        .or_else(|| select_best_available(&[router_ids::HTTP_REGULAR, router_ids::GRPC_REGULAR]))
+                }
             }
-        };
+            // `loads_guard` 和 `counts_guard` 在这个花括号结束时被释放，读锁解除！
+        }; 
 
-        // --- After choice is made, record it ---
+        // --- 步骤 2: 记录阶段 ---
+        // 现在我们没有任何锁，可以安全地请求写锁了
         if let Some(ref chosen_id) = choice {
-            // Add to global history
+            // 记录到请求历史队列
             self.global_request_queue.write().unwrap().push_back(RequestRecord {
                 token_count,
                 timestamp: Instant::now(),
                 router_id: chosen_id.clone(),
             });
 
-            // Update the router's load
-            let mut loads_guard = self.router_loads.write().unwrap();
+            // 更新路由器负载
+            let mut loads_guard = self.router_loads.write().unwrap(); // 安全获取写锁
             *loads_guard.entry(chosen_id.clone()).or_insert(0) += token_count;
+            info!("Updated load for {}: {}", chosen_id.as_str(), loads_guard.get(chosen_id).unwrap());
         }
         
+        // --- 步骤 3: 返回决策结果 ---
         choice
     }
+
 }
