@@ -2,13 +2,14 @@ use std::sync::Arc;
 
 use super::proportion::{ProportionScheduler, ProportionSchedulerConfig};
 use super::SchedulerPolicy; 
-use crate::config::SchedulerConfig; 
+use crate::config::SchedulerConfig;
+use crate::app_context::AppContext;
 
 pub struct SchedulerFactory;
 
 impl SchedulerFactory {
     /// Create a scheduler policy from configuration.
-    pub fn create_from_config(config: &SchedulerConfig) -> Arc<dyn SchedulerPolicy> {
+    pub fn create_from_config(config: &SchedulerConfig, app_context: &Arc<AppContext>) -> Arc<dyn SchedulerPolicy> {
         match config {
             SchedulerConfig::Proportion {
                 adjust_interval,
@@ -33,7 +34,10 @@ impl SchedulerFactory {
                 };
 
                 // 调用 ProportionScheduler 的 new 方法
-                Arc::new(ProportionScheduler::new(scheduler_config))
+                Arc::new(ProportionScheduler::new(
+                    scheduler_config,
+                    Arc::clone(&app_context.worker_registry),
+                ))
             }
         }
     }

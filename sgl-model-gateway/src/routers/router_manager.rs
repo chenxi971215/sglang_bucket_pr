@@ -97,7 +97,8 @@ impl RouterManager {
         use crate::routers::RouterFactory;
 
         let scheduler_config = &config.router_config.scheduler;
-        let scheduler = SchedulerFactory::create_from_config(scheduler_config);
+        // let scheduler = SchedulerFactory::create_from_config(scheduler_config);
+        let scheduler = SchedulerFactory::create_from_config(scheduler_config, app_context);
 
         let mut manager = Self::new(app_context.worker_registry.clone());
         manager.enable_igw = config.router_config.enable_igw;

@@ -6,6 +6,7 @@ use tracing::debug;
 use async_trait::async_trait;
 use crate::schedulers::{SchedulerPolicy, SelectRouterInfo};
 use crate::routers::router_manager::{router_ids, RouterId};
+use crate::core::{WorkerRegistry, WorkerType};
 
 /// Configuration for the ProportionScheduler.
 #[derive(Debug, Clone)]
@@ -65,11 +66,13 @@ pub struct ProportionScheduler {
     config: ProportionSchedulerConfig,
     /// Handle for the background adjustment task.
     _adjustment_handle: tokio::task::JoinHandle<()>,
+    // get worker info
+    worker_registry: Arc<WorkerRegistry>,
 }
 
 impl ProportionScheduler {
     /// Creates a new `ProportionScheduler` and starts its background adjustment task.
-    pub fn new(config: ProportionSchedulerConfig) -> Self {
+    pub fn new(config: ProportionSchedulerConfig, worker_registry: Arc<WorkerRegistry>) -> Self {
         let crossover_point = Arc::new(RwLock::new(512)); // Start with a safe default
         let global_request_queue = Arc::new(RwLock::new(VecDeque::new()));
         let router_loads = Arc::new(RwLock::new(std::collections::HashMap::new()));
@@ -80,6 +83,7 @@ impl ProportionScheduler {
             Arc::clone(&global_request_queue),
             Arc::clone(&router_loads),
             Arc::clone(&worker_counts),
+            Arc::clone(&worker_registry),
             config.clone(),
         );
 
@@ -89,14 +93,9 @@ impl ProportionScheduler {
             router_loads,
             worker_counts,
             config,
+            worker_registry,
             _adjustment_handle: adjustment_handle,
         }
-    }
-
-    pub fn update_worker_counts(&self, counts: std::collections::HashMap<RouterId, usize>) {
-        let mut worker_counts_guard = self.worker_counts.write().unwrap();
-        *worker_counts_guard = counts;
-        info!("ProportionScheduler: Updated worker counts: {:?}", *worker_counts_guard);
     }
 
 
@@ -106,6 +105,7 @@ impl ProportionScheduler {
         global_request_queue: Arc<RwLock<VecDeque<RequestRecord>>>,
         router_loads: Arc<RwLock<std::collections::HashMap<RouterId, usize>>>,
         worker_counts: Arc<RwLock<std::collections::HashMap<RouterId, usize>>>,
+        worker_registry: Arc<WorkerRegistry>,
         config: ProportionSchedulerConfig,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
@@ -113,6 +113,16 @@ impl ProportionScheduler {
                 tokio::time::sleep(config.adjust_interval).await;
                 info!("触发调整");
                 // --- 1. Decay Old Records ---
+                // --- 1. 更新 Worker 数量和负载 (从 WorkerRegistry 拉取) ---
+                let (regular_workers, pd_workers) = worker_registry.get_worker_distribution();
+                // 更新缓存的 worker 数量
+                {
+                    let mut counts_guard = worker_counts.write().unwrap();
+                    // 这里我们简化，只关心 Regular 和 PD 两大类
+                    counts_guard.insert(router_ids::HTTP_REGULAR, regular_workers); // 用一个代表即可
+                    counts_guard.insert(router_ids::HTTP_PD, pd_workers); // 用一个代表即可
+                }
+
                 let mut queue_guard = global_request_queue.write().unwrap();
                 let mut loads_guard = router_loads.write().unwrap();
                 let now = Instant::now();
@@ -203,14 +213,34 @@ impl SchedulerPolicy for ProportionScheduler {
             let pd_load = *loads_guard.get(&router_ids::HTTP_PD).unwrap_or(&0) + *loads_guard.get(&router_ids::GRPC_PD).unwrap_or(&0);
             let regular_load = *loads_guard.get(&router_ids::HTTP_REGULAR).unwrap_or(&0) + *loads_guard.get(&router_ids::GRPC_REGULAR).unwrap_or(&0);
 
-            let pd_workers = *counts_guard.get(&router_ids::HTTP_PD).unwrap_or(&0) + *counts_guard.get(&router_ids::GRPC_PD).unwrap_or(&0);
-            let regular_workers = *counts_guard.get(&router_ids::HTTP_REGULAR).unwrap_or(&0) + *counts_guard.get(&router_ids::GRPC_REGULAR).unwrap_or(&0);
+            // let pd_workers = *counts_guard.get(&router_ids::HTTP_PD).unwrap_or(&0) + *counts_guard.get(&router_ids::GRPC_PD).unwrap_or(&0);
+            // let regular_workers = *counts_guard.get(&router_ids::HTTP_REGULAR).unwrap_or(&0) + *counts_guard.get(&router_ids::GRPC_REGULAR).unwrap_or(&0);
+
+            let regular_workers = *counts_guard.get(&router_ids::HTTP_REGULAR).unwrap_or(&0);
+            let pd_workers = *counts_guard.get(&router_ids::HTTP_PD).unwrap_or(&0);
+
+            if regular_workers == 0 && pd_workers == 0 {
+                info!("ProportionScheduler: No regular or PD workers available.");
+                return None;
+            }
 
             let total_pd_weight = pd_workers as f32;
             let total_regular_weight = regular_workers as f32 * self.config.regular_worker_weight;
 
             let norm_pd_load = if total_pd_weight > 0.0 { pd_load as f32 / total_pd_weight } else { f32::MAX };
             let norm_regular_load = if total_regular_weight > 0.0 { regular_load as f32 / total_regular_weight } else { f32::MAX };
+
+            info!("loads_guard {:#?}", loads_guard);
+            info!("counts_guard {:#?}", counts_guard);
+            info!("pd_load {:#?}", pd_load);
+            info!("regular_load {:#?}", regular_load);
+            info!("pd_workers {:#?}", pd_workers);
+            info!("regular_workers {:#?}", regular_workers);
+            info!("total_pd_weight {:#?}", total_pd_weight);
+            info!("total_regular_weight {:#?}", total_regular_weight);
+            info!("norm_pd_load {:#?}", norm_pd_load);
+            info!("norm_regular_load {:#?}", norm_regular_load);
+
             
             let select_best_available = |choices: &[RouterId]| -> Option<RouterId> {
                 choices.iter().find(|id| candidate_routers.contains(id)).cloned()
