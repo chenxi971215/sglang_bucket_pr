@@ -26,9 +26,9 @@ pub struct ProportionSchedulerConfig {
 impl Default for ProportionSchedulerConfig {
     fn default() -> Self {
         Self {
-            adjust_interval: Duration::from_secs(5),
+            adjust_interval: Duration::from_secs(1),
             adjust_window: Duration::from_secs(10),
-            balance_abs_threshold: 2000,
+            balance_abs_threshold: 10,
             balance_rel_threshold: 1.001,
             regular_worker_weight: 0.4,
         }
@@ -54,26 +54,25 @@ struct RequestRecord {
 /// proportional load distribution.
 #[derive(Debug)]
 pub struct ProportionScheduler {
-    /// The dynamically calculated token threshold for routing.
+    /// reguler pd分割线
     crossover_point: Arc<RwLock<usize>>,
-    /// A queue of recent requests used for calculating the crossover point.
+    /// 全局请求队列
     global_request_queue: Arc<RwLock<VecDeque<RequestRecord>>>,
-    /// The current total token load for the routers within the adjustment window.
+    /// 记录router负载
     router_loads: Arc<RwLock<std::collections::HashMap<RouterId, usize>>>,
-    /// The current workers count for the routers
+    /// 记录router下属worker数量
     worker_counts: Arc<RwLock<std::collections::HashMap<RouterId, usize>>>,
     /// Scheduler configuration.
     config: ProportionSchedulerConfig,
-    /// Handle for the background adjustment task.
+    /// 调整句柄
     _adjustment_handle: tokio::task::JoinHandle<()>,
-    // get worker info
+    // worker info
     worker_registry: Arc<WorkerRegistry>,
 }
 
 impl ProportionScheduler {
-    /// Creates a new `ProportionScheduler` and starts its background adjustment task.
     pub fn new(config: ProportionSchedulerConfig, worker_registry: Arc<WorkerRegistry>) -> Self {
-        let crossover_point = Arc::new(RwLock::new(512)); // Start with a safe default
+        let crossover_point = Arc::new(RwLock::new(512));
         let global_request_queue = Arc::new(RwLock::new(VecDeque::new()));
         let router_loads = Arc::new(RwLock::new(std::collections::HashMap::new()));
         let worker_counts = Arc::new(RwLock::new(std::collections::HashMap::new()));
@@ -99,7 +98,6 @@ impl ProportionScheduler {
     }
 
 
-    /// Spawns the background task responsible for periodically adjusting the crossover point.
     fn start_adjustment_task(
         crossover_point: Arc<RwLock<usize>>,
         global_request_queue: Arc<RwLock<VecDeque<RequestRecord>>>,
@@ -110,41 +108,46 @@ impl ProportionScheduler {
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             loop {
+                info!("开始调整================");
                 tokio::time::sleep(config.adjust_interval).await;
-                info!("触发调整");
-                // --- 1. Decay Old Records ---
-                // --- 1. 更新 Worker 数量和负载 (从 WorkerRegistry 拉取) ---
+                // 获取worker数量
                 let (regular_workers, pd_workers) = worker_registry.get_worker_distribution();
-                // 更新缓存的 worker 数量
                 {
+                    // 简化写法全部采用http
                     let mut counts_guard = worker_counts.write().unwrap();
-                    // 这里我们简化，只关心 Regular 和 PD 两大类
-                    counts_guard.insert(router_ids::HTTP_REGULAR, regular_workers); // 用一个代表即可
-                    counts_guard.insert(router_ids::HTTP_PD, pd_workers); // 用一个代表即可
+                    counts_guard.insert(router_ids::HTTP_REGULAR, regular_workers);
+                    counts_guard.insert(router_ids::HTTP_PD, pd_workers);
                 }
-
-                let mut queue_guard = global_request_queue.write().unwrap();
-                let mut loads_guard = router_loads.write().unwrap();
-                let now = Instant::now();
-                while let Some(req) = queue_guard.front() {
-                    if now.duration_since(req.timestamp) > config.adjust_window {
-                        if let Some(oldest_req) = queue_guard.pop_front() {
-                            if let Some(load) = loads_guard.get_mut(&oldest_req.router_id) {
-                                *load = load.saturating_sub(oldest_req.token_count);
+                {
+                    let mut queue_guard = global_request_queue.write().unwrap();
+                    let mut loads_guard = router_loads.write().unwrap();
+                    let now = Instant::now();
+                    // 更新请求队列，超时请求需要清理
+                    while let Some(req) = queue_guard.front() {
+                        if now.duration_since(req.timestamp) > config.adjust_window {
+                            if let Some(oldest_req) = queue_guard.pop_front() {
+                                if let Some(load) = loads_guard.get_mut(&oldest_req.router_id) {
+                                    *load = load.saturating_sub(oldest_req.token_count);
+                                }
                             }
+                        } else {
+                            break;
                         }
-                    } else {
-                        break;
                     }
                 }
-                drop(loads_guard); // Release lock
 
-                // --- 2. Adjust Crossover Point ---
+                // 计算CrossoverPoint
                 let counts_guard = worker_counts.read().unwrap();
+                let queue_guard = global_request_queue.read().unwrap();
+
                 let pd_workers = *counts_guard.get(&router_ids::HTTP_PD).unwrap_or(&0) + *counts_guard.get(&router_ids::GRPC_PD).unwrap_or(&0);
                 let regular_workers = *counts_guard.get(&router_ids::HTTP_REGULAR).unwrap_or(&0) + *counts_guard.get(&router_ids::GRPC_REGULAR).unwrap_or(&0);
+                // info!("queue_guard {:#?}", queue_guard);
+                // info!("pd_workers {:#?}", pd_workers);
+                // info!("regular_workers {:#?}", regular_workers);
 
                 if queue_guard.is_empty() || pd_workers == 0 || regular_workers == 0 {
+                    info!("queue_guard.is_empty() || pd_workers == 0 || regular_workers == 0");
                     continue;
                 }
 
@@ -152,7 +155,10 @@ impl ProportionScheduler {
                 let total_regular_weight = regular_workers as f32 * config.regular_worker_weight;
                 let total_weight = total_pd_weight + total_regular_weight;
 
-                if total_weight == 0.0 { continue; }
+                if total_weight == 0.0 { 
+                    info!("total_weight == 0.0");
+                    continue; 
+                }
 
                 let ideal_regular_load_share = total_regular_weight / total_weight;
 
@@ -160,7 +166,10 @@ impl ProportionScheduler {
                 sorted_token_counts.sort_unstable();
 
                 let total_global_load: usize = sorted_token_counts.iter().sum();
-                if total_global_load == 0 { continue; }
+                if total_global_load == 0 { 
+                    info!("total_global_load == 0");
+                    continue; 
+                }
 
                 let mut accumulated_load: usize = 0;
                 let mut new_crossover_point = *crossover_point.read().unwrap(); 
@@ -201,20 +210,13 @@ impl SchedulerPolicy for ProportionScheduler {
         candidate_routers: &[RouterId],
         info: &SelectRouterInfo<'_>,
     ) -> Option<RouterId> {
-        info!("select_router open");
         let token_count = info.tokens.map_or(0, |t| t.len());
-
-        // --- 步骤 1: 决策阶段 ---
-        // 把所有需要读锁的操作放在一个代码块里
-        let choice: Option<RouterId> = { // 使用块表达式来限制锁的生命周期
+        let choice: Option<RouterId> = {
             let loads_guard = self.router_loads.read().unwrap();
             let counts_guard = self.worker_counts.read().unwrap();
 
-            let pd_load = *loads_guard.get(&router_ids::HTTP_PD).unwrap_or(&0) + *loads_guard.get(&router_ids::GRPC_PD).unwrap_or(&0);
-            let regular_load = *loads_guard.get(&router_ids::HTTP_REGULAR).unwrap_or(&0) + *loads_guard.get(&router_ids::GRPC_REGULAR).unwrap_or(&0);
-
-            // let pd_workers = *counts_guard.get(&router_ids::HTTP_PD).unwrap_or(&0) + *counts_guard.get(&router_ids::GRPC_PD).unwrap_or(&0);
-            // let regular_workers = *counts_guard.get(&router_ids::HTTP_REGULAR).unwrap_or(&0) + *counts_guard.get(&router_ids::GRPC_REGULAR).unwrap_or(&0);
+            let pd_load = *loads_guard.get(&router_ids::HTTP_PD).unwrap_or(&0);
+            let regular_load = *loads_guard.get(&router_ids::HTTP_REGULAR).unwrap_or(&0);
 
             let regular_workers = *counts_guard.get(&router_ids::HTTP_REGULAR).unwrap_or(&0);
             let pd_workers = *counts_guard.get(&router_ids::HTTP_PD).unwrap_or(&0);
@@ -271,26 +273,23 @@ impl SchedulerPolicy for ProportionScheduler {
                         .or_else(|| select_best_available(&[router_ids::HTTP_REGULAR, router_ids::GRPC_REGULAR]))
                 }
             }
-            // `loads_guard` 和 `counts_guard` 在这个花括号结束时被释放，读锁解除！
+            
         }; 
-
-        // --- 步骤 2: 记录阶段 ---
-        // 现在我们没有任何锁，可以安全地请求写锁了
         if let Some(ref chosen_id) = choice {
-            // 记录到请求历史队列
+            // 更新队列
             self.global_request_queue.write().unwrap().push_back(RequestRecord {
                 token_count,
                 timestamp: Instant::now(),
                 router_id: chosen_id.clone(),
             });
+            info!("global_request_queue info {:#?}", self.global_request_queue);
 
-            // 更新路由器负载
+            // 更新router负载
             let mut loads_guard = self.router_loads.write().unwrap(); // 安全获取写锁
             *loads_guard.entry(chosen_id.clone()).or_insert(0) += token_count;
             info!("Updated load for {}: {}", chosen_id.as_str(), loads_guard.get(chosen_id).unwrap());
         }
         
-        // --- 步骤 3: 返回决策结果 ---
         choice
     }
 
