@@ -129,6 +129,7 @@ impl ProportionScheduler {
                                 if let Some(load) = loads_guard.get_mut(&oldest_req.router_id) {
                                     *load = load.saturating_sub(oldest_req.token_count);
                                 }
+                                info!("Cleaned_req: {:?}", oldest_req);
                             }
                         } else {
                             break;
