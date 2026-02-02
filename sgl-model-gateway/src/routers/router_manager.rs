@@ -452,7 +452,7 @@ impl RouterManager {
             tokens: tokens.as_deref(),
             model_id,
         };
-        info!("SelectRouterInfo {:#?}", info);
+        // info!("SelectRouterInfo {:#?}", info);
 
         let selected_router_id = self
             .scheduler
