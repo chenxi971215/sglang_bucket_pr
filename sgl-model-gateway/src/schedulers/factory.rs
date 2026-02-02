@@ -6,6 +6,7 @@ use crate::config::SchedulerConfig;
 use crate::app_context::AppContext;
 
 pub struct SchedulerFactory;
+use tracing::info;
 
 impl SchedulerFactory {
     /// Create a scheduler policy from configuration.
@@ -32,6 +33,7 @@ impl SchedulerFactory {
                     balance_rel_threshold: *balance_rel_threshold,
                     regular_worker_weight: *regular_worker_weight,
                 };
+                info!("====== {:#?}", scheduler_config);
 
                 // 调用 ProportionScheduler 的 new 方法
                 Arc::new(ProportionScheduler::new(

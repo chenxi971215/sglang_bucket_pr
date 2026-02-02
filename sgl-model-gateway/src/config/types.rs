@@ -12,7 +12,6 @@ pub struct RouterConfig {
     pub mode: RoutingMode,
     #[serde(default)]
     pub connection_mode: ConnectionMode,
-    #[serde(default)]
     pub scheduler: SchedulerConfig,
     pub policy: PolicyConfig,
     pub host: String,
@@ -400,9 +399,9 @@ pub enum SchedulerConfig {
 impl Default for SchedulerConfig {
     fn default() -> Self {
         Self::Proportion {
-            adjust_interval: 10,
-            adjust_window: 10,
-            balance_abs_threshold: 3000,
+            adjust_interval: 1,
+            adjust_window: 2,
+            balance_abs_threshold: 20,
             balance_rel_threshold: 1.001,
             regular_worker_weight: 0.4,
         }

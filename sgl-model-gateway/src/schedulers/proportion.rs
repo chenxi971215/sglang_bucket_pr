@@ -25,6 +25,7 @@ pub struct ProportionSchedulerConfig {
 
 impl Default for ProportionSchedulerConfig {
     fn default() -> Self {
+        info!("默认方法");
         Self {
             adjust_interval: Duration::from_secs(1),
             adjust_window: Duration::from_secs(2),
@@ -47,7 +48,8 @@ pub enum RouterChoice {
 struct RequestRecord {
     token_count: usize,
     timestamp: Instant,
-    router_id: RouterId, 
+    router_id: RouterId,
+
 }
 
 /// A scheduler that routes requests between Regular and PD routers based on
