@@ -350,8 +350,8 @@ struct Router {
     scheduler_balance_abs_threshold: usize,
     scheduler_balance_rel_threshold: f32,
     scheduler_regular_worker_weight: f32,
-    scheduler_adjust_interval_secs: u64,
-    scheduler_adjust_window_secs: u64,
+    scheduler_adjust_interval_secs: usize,
+    scheduler_adjust_window_secs: usize,
     policy: PolicyType,
     worker_startup_timeout_secs: u64,
     worker_startup_check_interval: u64,
@@ -449,15 +449,16 @@ impl Router {
         use config::{
             DiscoveryConfig, MetricsConfig, PolicyConfig as ConfigPolicyConfig, RoutingMode, SchedulerConfig
         };
-        let scheduler_config = SchedulerConfig {
-            strategy: match self.scheduler_strategy {
-                SchedulerPolicyType::Proportion => config::SchedulerStrategy::Proportion,
-            },
-            balance_abs_threshold: self.scheduler_balance_abs_threshold,
-            balance_rel_threshold: self.scheduler_balance_rel_threshold,
-            regular_worker_weight: self.scheduler_regular_worker_weight,
-            adjust_interval_secs: self.scheduler_adjust_interval_secs,
-            adjust_window_secs: self.scheduler_adjust_window_secs,
+        let convert_scheduler_policy = |scheduler: &SchedulerPolicyType| -> SchedulerConfig {
+            match scheduler{
+                SchedulerPolicyType::Proportion => SchedulerConfig::Proportion {
+                    balance_abs_threshold: self.scheduler_balance_abs_threshold,
+                    balance_rel_threshold: self.scheduler_balance_rel_threshold,
+                    regular_worker_weight: self.scheduler_regular_worker_weight,
+                    adjust_interval: self.scheduler_adjust_interval_secs,
+                    adjust_window: self.scheduler_adjust_window_secs,
+                },
+            }
         };
 
         let convert_policy = |policy: &PolicyType| -> ConfigPolicyConfig {
@@ -519,6 +520,8 @@ impl Router {
         };
 
         let policy = convert_policy(&self.policy);
+
+        let scheduler_policy = convert_scheduler_policy(&self.scheduler_strategy);
 
         let discovery = if self.service_discovery {
             Some(DiscoveryConfig {
@@ -584,7 +587,7 @@ impl Router {
 
         config::RouterConfig::builder()
             .mode(mode)
-            .scheduler_config(scheduler_config)
+            .scheduler(scheduler_policy)
             .policy(policy)
             .host(&self.host)
             .port(self.port)
@@ -664,6 +667,12 @@ impl Router {
     #[new]
     #[pyo3(signature = (
         worker_urls,
+        scheduler_strategy: SchedulerPolicyType::Proportion,
+        scheduler_balance_abs_threshold: usize,
+        scheduler_balance_rel_threshold: f32,
+        scheduler_regular_worker_weight: f32,
+        scheduler_adjust_interval_secs: usize,
+        scheduler_adjust_window_secs: usize,
         policy = PolicyType::RoundRobin,
         host = String::from("0.0.0.0"),
         port = 3001,
@@ -754,8 +763,8 @@ impl Router {
         scheduler_balance_abs_threshold: usize,
         scheduler_balance_rel_threshold: f32,
         scheduler_regular_worker_weight: f32,
-        scheduler_adjust_interval_secs: u64,
-        scheduler_adjust_window_secs: u64,
+        scheduler_adjust_interval_secs: usize,
+        scheduler_adjust_window_secs: usize,
         policy: PolicyType,
         host: String,
         port: u16,
