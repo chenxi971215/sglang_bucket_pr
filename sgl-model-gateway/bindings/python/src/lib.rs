@@ -667,12 +667,12 @@ impl Router {
     #[new]
     #[pyo3(signature = (
         worker_urls,
-        scheduler_strategy: SchedulerPolicyType::Proportion,
-        scheduler_balance_abs_threshold: usize,
-        scheduler_balance_rel_threshold: f32,
-        scheduler_regular_worker_weight: f32,
-        scheduler_adjust_interval_secs: usize,
-        scheduler_adjust_window_secs: usize,
+        scheduler_strategy = SchedulerPolicyType::Proportion,
+        scheduler_balance_abs_threshold = 100,
+        scheduler_balance_rel_threshold = 1.1,
+        scheduler_regular_worker_weight = 0.4,
+        scheduler_adjust_interval_secs = 5,
+        scheduler_adjust_window_secs= 10,
         policy = PolicyType::RoundRobin,
         host = String::from("0.0.0.0"),
         port = 3001,
