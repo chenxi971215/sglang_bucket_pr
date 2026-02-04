@@ -44,6 +44,7 @@ impl BucketPolicy {
     }
 
     pub fn with_config(config: BucketConfig) -> Self {
+        info!("执行bucket_with_config");
         let buckets = Arc::new(DashMap::<String, Arc<RwLock<Bucket>>>::new());
 
         let adjustment_handle = {
@@ -59,6 +60,7 @@ impl BucketPolicy {
                     let bucket = bucket_ref.value();
                     match bucket.write() {
                         Ok(mut bucket_guard) => {
+                            info!("触发adjust_boundary");
                             bucket_guard.adjust_boundary();
                         }
                         Err(e) => {
@@ -116,6 +118,7 @@ impl BucketPolicy {
     }
 
     pub fn add_prefill_url(&self, worker: &dyn Worker) {
+        info!("==========add_prefill_url");
         let model_key = normalize_model_key(worker.model_id());
         let bucket = self
             .buckets

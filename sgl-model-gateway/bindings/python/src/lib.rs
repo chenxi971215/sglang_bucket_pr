@@ -499,6 +499,21 @@ impl Router {
         };
 
         let mode = if self.enable_igw {
+            // 这里原本是加载RoutingMode::Regular，现在为了兼容网关模式下pd router的策略加载
+            // 如果有pd策略，优先设置成pd policy
+            // if self.prefill_policy.is_some() || self.decode_policy.is_some() {
+            //     println!("prefill_policy和decode_policy有一个不为空");
+            //     RoutingMode::PrefillDecode {
+            //         prefill_urls: self.prefill_urls.clone().unwrap_or_default(),
+            //         decode_urls: self.decode_urls.clone().unwrap_or_default(),
+            //         prefill_policy: self.prefill_policy.as_ref().map(convert_policy),
+            //         decode_policy: self.decode_policy.as_ref().map(convert_policy),
+            //     }
+            // }else {
+            //     RoutingMode::Regular {
+            //         worker_urls: vec![],
+            //     }
+            // }
             RoutingMode::Regular {
                 worker_urls: vec![],
             }
