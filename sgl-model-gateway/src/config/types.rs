@@ -314,7 +314,7 @@ impl RedisConfig {
 #[serde(tag = "type")]
 pub enum RoutingMode {
     #[serde(rename = "regular")]
-    Regular { worker_urls: Vec<String> },
+    Regular { worker_urls: Vec<String>},
     #[serde(rename = "prefill_decode")]
     PrefillDecode {
         /// With optional bootstrap ports

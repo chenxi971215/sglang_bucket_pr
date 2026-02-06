@@ -82,6 +82,7 @@ impl BucketPolicy {
     }
 
     pub fn init_prefill_worker_urls(&self, prefill_workers: &[Arc<dyn Worker>]) {
+        info!("init_prefill_worker_urls ==> {:#?}", prefill_workers);
         // Group workers by model
         let mut model_workers: HashMap<String, Vec<&Arc<dyn Worker>>> = HashMap::new();
         for worker in prefill_workers {
