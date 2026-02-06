@@ -110,26 +110,26 @@ impl RouterManager {
         if config.router_config.enable_igw {
             info!("Initializing RouterManager in multi-router mode (IGW)");
 
-            // match RouterFactory::create_regular_router(app_context).await {
-            //     Ok(http_regular) => {
-            //         info!("Created HTTP Regular router");
-            //         manager.register_router(router_ids::HTTP_REGULAR, Arc::from(http_regular));
-            //     }
-            //     Err(e) => {
-            //         warn!("Failed to create HTTP Regular router: {e}");
-            //     }
-            // }
+            match RouterFactory::create_regular_router(app_context).await {
+                Ok(http_regular) => {
+                    info!("Created HTTP Regular router");
+                    manager.register_router(router_ids::HTTP_REGULAR, Arc::from(http_regular));
+                }
+                Err(e) => {
+                    warn!("Failed to create HTTP Regular router: {e}");
+                }
+            }
 
             // Always create gRPC Regular router in IGW mode
-            // match RouterFactory::create_grpc_router(app_context).await {
-            //     Ok(grpc_regular) => {
-            //         info!("Created gRPC Regular router");
-            //         manager.register_router(router_ids::GRPC_REGULAR, Arc::from(grpc_regular));
-            //     }
-            //     Err(e) => {
-            //         warn!("Failed to create gRPC Regular router: {e}");
-            //     }
-            // }
+            match RouterFactory::create_grpc_router(app_context).await {
+                Ok(grpc_regular) => {
+                    info!("Created gRPC Regular router");
+                    manager.register_router(router_ids::GRPC_REGULAR, Arc::from(grpc_regular));
+                }
+                Err(e) => {
+                    warn!("Failed to create gRPC Regular router: {e}");
+                }
+            }
 
             // info!("PD disaggregation auto-enabled for IGW mode, creating PD routers");
 
