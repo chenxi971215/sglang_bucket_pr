@@ -120,16 +120,16 @@ impl RouterManager {
                 }
             }
 
-            // Always create gRPC Regular router in IGW mode
-            match RouterFactory::create_grpc_router(app_context).await {
-                Ok(grpc_regular) => {
-                    info!("Created gRPC Regular router");
-                    manager.register_router(router_ids::GRPC_REGULAR, Arc::from(grpc_regular));
-                }
-                Err(e) => {
-                    warn!("Failed to create gRPC Regular router: {e}");
-                }
-            }
+            // // Always create gRPC Regular router in IGW mode
+            // match RouterFactory::create_grpc_router(app_context).await {
+            //     Ok(grpc_regular) => {
+            //         info!("Created gRPC Regular router");
+            //         manager.register_router(router_ids::GRPC_REGULAR, Arc::from(grpc_regular));
+            //     }
+            //     Err(e) => {
+            //         warn!("Failed to create gRPC Regular router: {e}");
+            //     }
+            // }
 
             // info!("PD disaggregation auto-enabled for IGW mode, creating PD routers");
 
