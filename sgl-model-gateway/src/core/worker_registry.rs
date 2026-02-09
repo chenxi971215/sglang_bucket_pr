@@ -666,11 +666,6 @@ impl WorkerRegistry {
         // 只统计 Prefill workers，不包含 Decode
         let prefill_count = self.get_prefill_workers().len();
 
-        debug!(
-            "get_scheduler_worker_counts: regular={}, prefill={}",
-            regular_count, prefill_count
-        );
-
         (regular_count, prefill_count)
     }
 
