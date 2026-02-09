@@ -266,6 +266,7 @@ impl LoadBalancingPolicy for BucketPolicy {
             None => 0,
             Some(text) => text.chars().count(),
         };
+        info!("char_count ==> {:?}", char_count);
 
         // Determine the model for this set of workers (router pre-filters by model)
         // All workers should be from the same model
