@@ -279,6 +279,7 @@ impl LoadBalancingPolicy for BucketPolicy {
         let prefill_url = if let Some(bucket) = bucket {
             let (choiced_url, chars_per_url_snapshot) = {
                 let buc = bucket.read().unwrap();
+                info!("boundary==> {:#?}", buc);
                 let chars_per_url_snapshot = buc.chars_per_url.lock().unwrap().clone();
                 let choiced_url = buc.find_boundary(char_count);
                 (choiced_url, chars_per_url_snapshot)
@@ -289,6 +290,7 @@ impl LoadBalancingPolicy for BucketPolicy {
             let rel_threshold = self.config.balance_rel_threshold * min_load as f32;
             let is_imbalanced =
                 abs_diff > self.config.balance_abs_threshold && max_load as f32 > rel_threshold;
+            info!("chars_per_url_snapshot ==> {:#?}", chars_per_url_snapshot);
             info!(
                 "Current PD instance status | is_imbalanced={}",
                 is_imbalanced
