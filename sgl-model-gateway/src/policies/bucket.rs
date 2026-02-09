@@ -342,6 +342,7 @@ impl LoadBalancingPolicy for BucketPolicy {
             let prefill_url = selected_worker.url().to_string();
             prefill_url
         };
+        info!("select_worker res ==> {:?}", prefill_url);
 
         workers.iter().position(|w| w.url() == prefill_url)
     }
