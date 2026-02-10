@@ -40,6 +40,7 @@ pub struct PolicyRegistry {
 impl PolicyRegistry {
     /// Create a new PolicyRegistry with a default policy
     pub fn new(default_policy_config: PolicyConfig) -> Self {
+        info!("进入PolicyRegistry new 方法");
         let default_policy = Self::create_policy_from_config(&default_policy_config);
 
         Self {
@@ -381,6 +382,22 @@ impl PolicyRegistry {
                         );
                         bucket.init_prefill_worker_urls(prefill_workers);
                     }
+                }
+            }
+        }
+    }
+
+    /// Initialize bucket policies for regular (non-disaggregated) workers
+    pub fn init_regular_bucket_policies(&self, regular_workers: &[Arc<dyn Worker>]) {
+        // Initialize default policy if it's bucket
+        if self.default_policy.name() == "bucket" {
+            if let Some(bucket) = self.default_policy.as_any().downcast_ref::<BucketPolicy>() {
+                if !regular_workers.is_empty() {
+                    debug!(
+                        "Initializing regular bucket policy with {} workers",
+                        regular_workers.len()
+                    );
+                    bucket.init_regular_worker_urls(regular_workers);
                 }
             }
         }

@@ -12,6 +12,7 @@
 //! Uses virtual nodes (150 per worker) for even distribution and blake3 for stable hashing.
 
 use std::sync::{Arc, RwLock};
+use tracing::info;
 
 use dashmap::DashMap;
 use uuid::Uuid;
@@ -428,6 +429,20 @@ impl WorkerRegistry {
             .collect()
     }
 
+    /// Get all regular (non-disaggregated) workers
+    pub fn get_regular_workers(&self) -> Vec<Arc<dyn Worker>> {
+        self.workers
+            .iter()
+            .filter_map(|entry| {
+                let worker = entry.value();
+                match worker.worker_type() {
+                    WorkerType::Regular => Some(worker.clone()),
+                    _ => None,
+                }
+            })
+            .collect()
+    }
+
     /// Get all decode workers
     pub fn get_decode_workers(&self) -> Vec<Arc<dyn Worker>> {
         self.get_by_type(&WorkerType::Decode)
@@ -626,14 +641,32 @@ impl WorkerRegistry {
             .get(&WorkerType::Regular)
             .map(|v| v.len())
             .unwrap_or(0);
+        info!("get_worker_distribution ==> regular_count {}",regular_count);
 
         // Get total workers count efficiently from DashMap
         let total_workers = self.workers.len();
+        info!("get_worker_distribution ==> total_workers {}",total_workers);
 
         // PD workers are any workers that are not Regular
         let pd_count = total_workers.saturating_sub(regular_count);
+        info!("get_worker_distribution ==> pd_count {}",pd_count);
 
         (regular_count, pd_count)
+    }
+
+    /// Get counts of regular and prefill workers for scheduler
+    /// Returns (regular_count, prefill_count) - decode workers are excluded
+    pub fn get_scheduler_worker_counts(&self) -> (usize, usize) {
+        let regular_count = self
+            .type_workers
+            .get(&WorkerType::Regular)
+            .map(|v| v.len())
+            .unwrap_or(0);
+
+        // 只统计 Prefill workers，不包含 Decode
+        let prefill_count = self.get_prefill_workers().len();
+
+        (regular_count, prefill_count)
     }
 
     /// Start a health checker for all workers in the registry
